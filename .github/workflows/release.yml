@@ -1,0 +1,58 @@
+name: Release
+
+# Pushing a tag like v0.1.0 builds MacVirt.app and publishes a GitHub release
+# with the DMG, a zipped app and SHA-256 checksums attached.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install libvirt and QEMU
+        run: brew install libvirt qemu pkgconf
+
+      - name: Build MacVirt.app
+        run: |
+          export VERSION="${TAG#v}"
+          ./scripts/build-app.sh
+          ./scripts/make-dmg.sh
+          ditto -c -k --keepParent build/MacVirt.app "dist/MacVirt-$VERSION-arm64.zip"
+          (cd dist && shasum -a 256 "MacVirt-$VERSION-arm64.zip" > "MacVirt-$VERSION-arm64.zip.sha256")
+          ls -lh dist
+
+      - name: Smoke test bundle
+        run: |
+          C=build/MacVirt.app/Contents
+          # No Homebrew paths may remain in any bundled binary.
+          ! find "$C" -type f -perm +111 -exec otool -L {} \; 2>/dev/null | grep -q /opt/homebrew
+          "$C/MacOS/qemu-system-aarch64" --version
+          "$C/MacOS/qemu-img" --version
+          "$C/MacOS/virsh" --version
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "MacVirt ${TAG#v}" --generate-notes
+          fi
