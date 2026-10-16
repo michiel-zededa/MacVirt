@@ -13,12 +13,6 @@ enum SidebarItem: Hashable {
     }
 }
 
-/// Identifies a console window. Codable so SwiftUI can restore it.
-struct ConsoleTarget: Codable, Hashable {
-    var connectionID: UUID
-    var domainUUID: String
-}
-
 @MainActor @Observable
 final class AppModel {
     static let shared = AppModel()
@@ -40,7 +34,7 @@ final class AppModel {
         for (c, s) in zip(connections, saved) where s.autoconnect { c.connect() }
     }
 
-    private func persist() {
+    func persist() {
         if let data = try? JSONEncoder().encode(connections.map(\.saved)) {
             UserDefaults.standard.set(data, forKey: Self.defaultsKey)
         }

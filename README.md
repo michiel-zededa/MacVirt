@@ -1,8 +1,11 @@
 # MacVirt
 
-A native macOS virtual machine manager for [libvirt](https://libvirt.org), inspired by
-[virt-manager](https://github.com/virt-manager/virt-manager) and written from scratch
-in Swift and SwiftUI.
+A native macOS virtual machine manager for [libvirt](https://libvirt.org).
+
+MacVirt is based on the functionality of
+[virt-manager](https://github.com/virt-manager/virt-manager), but written from scratch
+for macOS in Swift (SwiftUI and AppKit). It aims for feature parity with virt-manager
+while looking and behaving like a native Mac app; no virt-manager code is used.
 
 MacVirt ships with everything it needs: libvirt and QEMU are bundled inside the app,
 so there is nothing to install with Homebrew.
@@ -13,12 +16,31 @@ so there is nothing to install with Homebrew.
   Hypervisor framework (ARM64 guests run natively; x86_64 guests are emulated).
 - **Remote KVM hosts** over SSH (`qemu+ssh://user@host/system`), like virt-manager.
   Passwords and host-key prompts appear as native dialogs.
-- VM list with live state and CPU usage; run, pause, resume, shut down, reboot, force off.
-- Built-in **VNC console** (no external viewer needed), including Ctrl+Alt+Del.
-- **New VM wizard**: ISO, architecture, memory, vCPUs and disk; creates the disk
-  image locally or in a storage pool on the remote host.
-- Domain details and an **XML editor** for everything the UI does not cover yet.
-- Delete VMs with or without their disk images.
+- **Manager window**: connections and VMs with live state and CPU graphs; run, pause,
+  resume, reboot, shut down, force reset, force off, save; clone, migrate, delete.
+- **VM window** with Console, Details and Snapshots, as in virt-manager:
+  - **Hardware details** for every device virt-manager shows (Overview, OS information,
+    Performance graphs, CPUs, Memory, Boot Options, disks, NICs, input, graphics, sound,
+    serial/parallel/console/channel, video, watchdog, controllers, filesystem, smartcard,
+    TPM, RNG, panic, VSOCK, host devices, USB redirection), each with a Details and XML tab.
+  - **Add Hardware** with all virt-manager categories, including storage volume creation,
+    USB/PCI host devices, and hot-plug into running VMs.
+  - **Snapshots**: internal and external, with run/revert, delete, descriptions and screenshots.
+  - **Consoles**: built-in VNC (with raw scancodes, so the guest's keyboard layout applies),
+    the Send Key menu, scaling, fullscreen, screenshots, and **serial/text consoles** with a
+    full terminal emulator.
+- **Connection Details**: host overview with CPU/memory graphs, **virtual networks** (create
+  NAT/routed/open/isolated networks, start/stop/autostart/delete) and **storage pools and
+  volumes** (all libvirt pool types, create/delete volumes, choose storage).
+- **New VM wizard**: install from ISO, network boot (PXE), import an existing disk or manual
+  install; OS profiles (incl. Windows with TPM 2.0/UEFI), BIOS/UEFI/Secure Boot, memory, CPUs,
+  storage, network and "Customize configuration before install".
+- **Clone**, **Migrate** (direct or tunnelled) and **Delete** (with per-disk storage choice).
+- **Preferences** for polling, console scaling and confirmations; a domain XML editor for
+  everything else.
+
+See [docs/virt-manager-parity.md](docs/virt-manager-parity.md) for the virt-manager
+behaviour MacVirt follows, and [docs/ROADMAP.md](docs/ROADMAP.md) for what is next.
 
 ## Install
 
@@ -39,7 +61,7 @@ Requirements: macOS 26 or later on Apple Silicon.
 | Piece | Where |
 |-------|-------|
 | App (SwiftUI) | `Contents/MacOS/MacVirt` |
-| libvirt daemon for local VMs | `Contents/MacOS/virtqemud`, started by the app |
+| libvirt daemon for local VMs (QEMU + storage drivers) | `Contents/MacOS/libvirtd`, started by the app |
 | QEMU, qemu-img | `Contents/MacOS/qemu-*`, firmware in `Contents/share/qemu` |
 | Libraries | `Contents/Frameworks` (all relinked to `@rpath`) |
 | libvirt state (sockets, configs, NVRAM) | `~/.macvirt` |

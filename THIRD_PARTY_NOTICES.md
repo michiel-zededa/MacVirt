@@ -8,6 +8,7 @@ license texts are in `MacVirt.app/Contents/Resources/licenses/`.
 |-----------|---------|--------|
 | libvirt (library, `virtqemud`, `virsh`, QEMU driver) | LGPL-2.1-or-later | https://libvirt.org/sources/ |
 | QEMU (`qemu-system-aarch64`, `qemu-system-x86_64`, `qemu-img`) | GPL-2.0 | https://www.qemu.org/download/ |
+| SwiftTerm 1.11.2 (terminal emulator, statically linked) | MIT | https://github.com/migueldeicaza/SwiftTerm |
 | EDK2 / OVMF firmware | BSD-2-Clause-Patent | https://github.com/tianocore/edk2 |
 | SeaBIOS, SeaVGABIOS, iPXE ROMs (shipped with QEMU) | LGPL-3.0 / GPL-2.0 | https://www.qemu.org/download/ |
 | GLib, gettext, GnuTLS, Nettle, GMP, libtasn1, p11-kit, libidn2, libunistring, json-c, libssh2, cyrus-sasl, pixman, libslirp, zstd, snappy, lzo, libpng, jpeg-turbo, capstone, dtc, vde, libusb, ncurses, and their dependencies | Various (LGPL, GPL, BSD, MIT, Zlib) | https://formulae.brew.sh |

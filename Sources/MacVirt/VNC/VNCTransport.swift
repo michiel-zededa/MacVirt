@@ -8,30 +8,47 @@ import Foundation
 final class VNCTransport: @unchecked Sendable {
     let readFD: Int32
     let writeFD: Int32
-    private let onClose: () -> Void
+    /// Stops the connection (unblocks readers, makes writes fail) without
+    /// releasing the descriptors.
+    private let onShutdown: () -> Void
+    /// Releases the descriptors; runs once nothing can use them any more.
+    private let onRelease: () -> Void
     private var closed = false
     private let lock = NSLock()
 
-    private init(readFD: Int32, writeFD: Int32, onClose: @escaping () -> Void) {
+    private init(readFD: Int32, writeFD: Int32, onShutdown: @escaping () -> Void, onRelease: @escaping () -> Void) {
         self.readFD = readFD
         self.writeFD = writeFD
-        self.onClose = onClose
+        self.onShutdown = onShutdown
+        self.onRelease = onRelease
     }
 
-    deinit { close() }
+    deinit {
+        close()
+        onRelease()
+    }
 
+    private var isClosed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return closed
+    }
+
+    /// Descriptors are only closed in deinit: closing them earlier would let a
+    /// late write from the UI hit whatever file reuses the number.
     func close() {
         lock.lock()
         defer { lock.unlock() }
         guard !closed else { return }
         closed = true
-        onClose()
+        onShutdown()
     }
 
     func readExactly(_ count: Int) throws -> [UInt8] {
         var buf = [UInt8](repeating: 0, count: count)
         var got = 0
         while got < count {
+            if isClosed { throw LibvirtError(message: "Console connection closed") }
             let n = buf.withUnsafeMutableBytes { Darwin.read(readFD, $0.baseAddress! + got, count - got) }
             if n < 0, errno == EINTR { continue }
             guard n > 0 else { throw LibvirtError(message: "Console connection closed") }
@@ -43,6 +60,7 @@ final class VNCTransport: @unchecked Sendable {
     func write(_ bytes: [UInt8]) throws {
         var sent = 0
         while sent < bytes.count {
+            if isClosed { throw LibvirtError(message: "Console connection closed") }
             let n = bytes.withUnsafeBytes { Darwin.write(writeFD, $0.baseAddress! + sent, bytes.count - sent) }
             if n < 0, errno == EINTR { continue }
             guard n > 0 else { throw LibvirtError(message: "Console connection closed") }
@@ -68,7 +86,9 @@ final class VNCTransport: @unchecked Sendable {
                     var one: Int32 = 1
                     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
                     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-                    return VNCTransport(readFD: fd, writeFD: fd) { Darwin.close(fd) }
+                    return VNCTransport(readFD: fd, writeFD: fd,
+                                        onShutdown: { Darwin.shutdown(fd, SHUT_RDWR) },
+                                        onRelease: { Darwin.close(fd) })
                 }
                 Darwin.close(fd)
             }
@@ -90,11 +110,12 @@ final class VNCTransport: @unchecked Sendable {
         p.standardError = FileHandle.nullDevice
         try p.run()
         return VNCTransport(readFD: fromSSH.fileHandleForReading.fileDescriptor,
-                            writeFD: toSSH.fileHandleForWriting.fileDescriptor) {
-            if p.isRunning { p.terminate() }
-            try? toSSH.fileHandleForWriting.close()
-            try? fromSSH.fileHandleForReading.close()
-        }
+                            writeFD: toSSH.fileHandleForWriting.fileDescriptor,
+                            onShutdown: { if p.isRunning { p.terminate() } },
+                            onRelease: {
+                                try? toSSH.fileHandleForWriting.close()
+                                try? fromSSH.fileHandleForReading.close()
+                            })
     }
 
     /// Picks the right transport for a libvirt URI and a VNC listener on that host.

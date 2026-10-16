@@ -37,14 +37,23 @@ cp "$QEMU/LICENSE" "$C/Resources/licenses/qemu-LICENSE"
 echo "==> Bundling libvirt and QEMU"
 python3 scripts/bundle_deps.py "$APP" \
     "$BIN=MacOS/MacVirt" \
-    "$LIBVIRT/sbin/virtqemud=MacOS/virtqemud" \
+    "$LIBVIRT/sbin/libvirtd=MacOS/libvirtd" \
     "$LIBVIRT/bin/virsh=MacOS/virsh" \
     "$LIBVIRT/lib/libvirt/connection-driver/libvirt_driver_qemu.dylib=Frameworks/libvirt/connection-driver/libvirt_driver_qemu.dylib" \
+    "$LIBVIRT/lib/libvirt/connection-driver/libvirt_driver_storage.dylib=Frameworks/libvirt/connection-driver/libvirt_driver_storage.dylib" \
+    "$LIBVIRT/lib/libvirt/connection-driver/libvirt_driver_secret.dylib=Frameworks/libvirt/connection-driver/libvirt_driver_secret.dylib" \
+    "$LIBVIRT/lib/libvirt/storage-backend/libvirt_storage_backend_fs.dylib=Frameworks/libvirt/storage-backend/libvirt_storage_backend_fs.dylib" \
     "$QEMU/bin/qemu-system-aarch64=MacOS/qemu-system-aarch64" \
     "$QEMU/bin/qemu-system-x86_64=MacOS/qemu-system-x86_64" \
     "$QEMU/bin/qemu-img=MacOS/qemu-img"
 
 # QEMU locates its data relative to the binary: MacOS/../share/qemu
+# UEFI firmware as qcow2: internal snapshots of UEFI VMs need qcow2 NVRAM,
+# and libvirt cannot convert a raw vars template. Also much smaller.
+for fw in edk2-aarch64-code edk2-arm-vars edk2-x86_64-code edk2-i386-vars; do
+    "$QEMU/bin/qemu-img" convert -q -f raw -O qcow2 "$QEMU/share/qemu/$fw.fd" "$C/share/qemu/$fw.qcow2"
+done
+# Raw images stay for VMs created by MacVirt 0.1.
 ( cd "$QEMU/share/qemu" && cp -R \
     edk2-aarch64-code.fd edk2-arm-vars.fd edk2-x86_64-code.fd edk2-i386-vars.fd edk2-licenses.txt \
     bios.bin bios-256k.bin vgabios*.bin efi-*.rom kvmvapic.bin linuxboot_dma.bin multiboot_dma.bin pvh.bin \

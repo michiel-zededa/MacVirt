@@ -9,29 +9,32 @@ struct MacVirtApp: App {
             ContentView()
                 .environment(app)
         }
-        .defaultSize(width: 1000, height: 640)
+        .defaultSize(width: 1180, height: 720)
         .commands {
             CommandGroup(replacing: .newItem) {
                 NewVMCommand()
                 AddConnectionCommand()
             }
-        }
-
-        WindowGroup("Console", id: "console", for: ConsoleTarget.self) { $target in
-            if let target {
-                ConsoleView(target: target)
+            CommandGroup(replacing: .appInfo) {
+                AboutCommand()
             }
         }
-        .defaultSize(width: 1040, height: 820)
+
+        WindowGroup("Virtual Machine", id: "vm", for: VMTarget.self) { $target in
+            if let target, let conn = app.connection(target.connectionID) {
+                VMView(connection: conn, uuid: target.domainUUID, initialTab: target.tab)
+                    .environment(app)
+            }
+        }
+        .defaultSize(width: 1100, height: 800)
 
         Window("About MacVirt", id: "about") {
             AboutView()
         }
         .windowResizability(.contentSize)
-        .commands {
-            CommandGroup(replacing: .appInfo) {
-                AboutCommand()
-            }
+
+        Settings {
+            PreferencesView()
         }
     }
 }
@@ -75,7 +78,7 @@ struct AboutView: View {
             Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 96, height: 96)
             Text("MacVirt").font(.title).bold()
             Text("Version \(version)").foregroundStyle(.secondary)
-            Text("A native macOS virtual machine manager for libvirt,\ninspired by virt-manager.")
+            Text("A native macOS virtual machine manager for libvirt.\nBased on the functionality of virt-manager,\nwritten from scratch for macOS in Swift.")
                 .multilineTextAlignment(.center)
             Text("Bundles libvirt \(Libvirt.version) and QEMU. Licensed under GPL-2.0-or-later.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -83,6 +86,53 @@ struct AboutView: View {
                 .font(.caption)
         }
         .padding(28)
-        .frame(width: 380)
+        .frame(width: 400)
+    }
+}
+
+struct PreferencesView: View {
+    @Bindable private var prefs = Preferences.shared
+
+    var body: some View {
+        TabView {
+            Form {
+                Toggle("Enable XML editing", isOn: $prefs.xmlEditingEnabled)
+                Picker("Storage format for new disks", selection: $prefs.defaultStorageFormat) {
+                    Text("QCOW2").tag("qcow2")
+                    Text("Raw").tag("raw")
+                }
+            }
+            .tabItem { Label("General", systemImage: "gearshape") }
+
+            Form {
+                Picker("Update status every", selection: $prefs.pollInterval) {
+                    ForEach([1.0, 2.0, 3.0, 5.0, 10.0], id: \.self) { Text("\(Int($0)) seconds").tag($0) }
+                }
+                Toggle("Show CPU usage graph in the VM list", isOn: $prefs.showCPUColumn)
+                Text("The poll interval applies to connections opened after the change.").font(.caption).foregroundStyle(.secondary)
+            }
+            .tabItem { Label("Polling", systemImage: "chart.xyaxis.line") }
+
+            Form {
+                Picker("Graphical console scaling", selection: $prefs.consoleScaling) {
+                    Text("Never").tag(0)
+                    Text("Only when fullscreen").tag(1)
+                    Text("Always").tag(2)
+                }
+                Toggle("Automatically connect to the console", isOn: $prefs.consoleAutoconnect)
+            }
+            .tabItem { Label("Console", systemImage: "display") }
+
+            Form {
+                Toggle("Force Off / Force Reset", isOn: $prefs.confirmForceOff)
+                Toggle("Shut Down / Reboot / Save", isOn: $prefs.confirmPowerOff)
+                Toggle("Pause", isOn: $prefs.confirmPause)
+                Toggle("Device removal", isOn: $prefs.confirmRemoveDevice)
+                Toggle("Deleting storage", isOn: $prefs.confirmDeleteStorage)
+            }
+            .tabItem { Label("Confirmations", systemImage: "questionmark.circle") }
+        }
+        .formStyle(.grouped)
+        .frame(width: 480, height: 300)
     }
 }

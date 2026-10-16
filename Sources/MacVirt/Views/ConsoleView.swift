@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// Owns the RFB client for one console window.
+/// Owns the RFB client for one graphical console.
 @MainActor @Observable
 final class ConsoleSession: RFBClientDelegate {
     enum Phase: Equatable { case connecting, connected, failed(String) }
@@ -22,7 +22,7 @@ final class ConsoleSession: RFBClientDelegate {
                 guard let vnc = details.graphics.first(where: { $0.type == "vnc" }) else {
                     throw LibvirtError(message: details.graphics.isEmpty
                         ? "This VM has no graphical display."
-                        : "Only VNC displays are supported (found \(details.graphics.map(\.type).joined(separator: ", "))).")
+                        : "MacVirt supports VNC displays; this VM only has \(details.graphics.map { Pretty.graphics($0.type) }.joined(separator: ", ")). Add a VNC display in the Details tab, or use a serial console.")
                 }
                 let transport = try await Task.detached { try VNCTransport.make(libvirtURI: uri, graphics: vnc) }.value
                 let client = RFBClient(transport: transport)
@@ -40,6 +40,7 @@ final class ConsoleSession: RFBClientDelegate {
         client?.delegate = nil
         client?.stop()
         client = nil
+        view.client = nil
     }
 
     nonisolated func rfbDidConnect(name: String, width: Int, height: Int) {
@@ -71,50 +72,48 @@ final class ConsoleSession: RFBClientDelegate {
             return alert.runModal() == .alertFirstButtonReturn ? field.stringValue : nil
         }
     }
+
+    /// Saves the current framebuffer as PNG.
+    func saveScreenshot(name: String) {
+        guard let image = view.image else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = "Screenshot_\(name)_\(Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "-")).png"
+        guard panel.runModal() == .OK, let url = panel.url,
+              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
+        try? png.write(to: url)
+    }
 }
 
 private struct VNCViewRepresentable: NSViewRepresentable {
     let view: VNCView
+    let scale: Bool
     func makeNSView(context: Context) -> VNCView { view }
-    func updateNSView(_ nsView: VNCView, context: Context) {}
+    func updateNSView(_ nsView: VNCView, context: Context) { nsView.scaleToFit = scale }
 }
 
-struct ConsoleView: View {
-    let target: ConsoleTarget
-    @StateVar private var session = ConsoleSession()
-    private var app: AppModel { .shared }
+struct GraphicalConsoleView: View {
+    let connection: ConnectionModel
+    let uuid: String
+    let session: ConsoleSession
+    let scale: Bool
 
-    private var connection: ConnectionModel? { app.connection(target.connectionID) }
-    private var domain: DomainSummary? { connection?.domains.first { $0.uuid == target.domainUUID } }
+    private var domain: DomainSummary? { connection.domain(uuid) }
 
     var body: some View {
         ZStack {
-            VNCViewRepresentable(view: session.view)
-                .aspectRatio(session.framebufferSize, contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(.black)
-            overlay
-        }
-        .frame(minWidth: 640, minHeight: 400)
-        .navigationTitle(domain?.name ?? "Console")
-        .navigationSubtitle(connection?.name ?? "")
-        .toolbar {
-            if let connection, let domain {
-                ToolbarItemGroup {
-                    ForEach([DomainAction.start, .pause, .resume, .shutdown], id: \.self) { action in
-                        if action.isAvailable(for: domain.state) {
-                            Button(action.title, systemImage: action.symbol) {
-                                connection.perform(action, on: domain.uuid)
-                            }
-                        }
-                    }
-                    Menu("Send Key", systemImage: "keyboard") {
-                        Button("Ctrl+Alt+Delete") { session.view.sendCtrlAltDel() }
-                    }
-                    Button("Reconnect", systemImage: "arrow.triangle.2.circlepath") { reconnect() }
+            if scale {
+                VNCViewRepresentable(view: session.view, scale: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView([.horizontal, .vertical]) {
+                    VNCViewRepresentable(view: session.view, scale: false)
+                        .frame(width: session.framebufferSize.width, height: session.framebufferSize.height)
                 }
             }
+            overlay
         }
+        .background(.black)
         .onAppear(perform: reconnect)
         .onDisappear { session.stop() }
         .onChange(of: domain?.state) { old, new in
@@ -133,7 +132,7 @@ struct ConsoleView: View {
                 Image(systemName: "display.trianglebadge.exclamationmark").font(.largeTitle)
                 Text(domain?.state.isActive == false ? "The virtual machine is not running." : message)
                     .multilineTextAlignment(.center)
-                if domain?.state.isActive == false, let connection, let domain {
+                if domain?.state.isActive == false, let domain {
                     Button("Run", systemImage: "play.fill") { connection.perform(.start, on: domain.uuid) }
                         .buttonStyle(.glassProminent)
                 } else {
@@ -141,16 +140,17 @@ struct ConsoleView: View {
                 }
             }
             .padding(24)
+            .frame(maxWidth: 480)
             .glassEffect(in: .rect(cornerRadius: 16))
         }
     }
 
-    private func reconnect() {
-        guard let connection, let domain, domain.state.isActive else {
+    func reconnect() {
+        guard let domain, domain.state.isActive else {
             session.stop()
             session.phase = .failed("The virtual machine is not running.")
             return
         }
-        session.connect(connection: connection, domainUUID: target.domainUUID)
+        session.connect(connection: connection, domainUUID: uuid)
     }
 }

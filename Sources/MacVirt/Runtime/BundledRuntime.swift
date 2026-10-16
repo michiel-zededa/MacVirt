@@ -2,8 +2,8 @@
 // Manages the libvirt + QEMU stack shipped inside MacVirt.app.
 //
 // Layout inside the bundle:
-//   Contents/MacOS/{MacVirt,virtqemud,qemu-system-*,qemu-img}
-//   Contents/Frameworks/*.dylib, Frameworks/libvirt/connection-driver/*.dylib
+//   Contents/MacOS/{MacVirt,libvirtd,virsh,qemu-system-*,qemu-img}
+//   Contents/Frameworks/*.dylib, Frameworks/libvirt/{connection-driver,storage-backend}/*.dylib
 //   Contents/share/qemu/...   (QEMU finds this relative to its binary)
 //
 // All libvirt session state lives under ~/.macvirt: UNIX socket paths are
@@ -32,10 +32,10 @@ enum BundledRuntime {
     static var bundleContents: URL { Bundle.main.bundleURL.appendingPathComponent("Contents") }
 
     static var isAvailable: Bool {
-        FileManager.default.isExecutableFile(atPath: bundleContents.appendingPathComponent("MacOS/virtqemud").path)
+        FileManager.default.isExecutableFile(atPath: bundleContents.appendingPathComponent("MacOS/libvirtd").path)
     }
 
-    private static var socketPath: String { runDir.appendingPathComponent("libvirt/virtqemud-sock").path }
+    private static var socketPath: String { runDir.appendingPathComponent("libvirt/libvirt-sock").path }
 
     /// Sets up the process environment. Must run before libvirt is initialised.
     static func prepare() {
@@ -63,6 +63,7 @@ enum BundledRuntime {
 
         guard isAvailable else { return }
         setenv("LIBVIRT_DRIVER_DIR", bundleContents.appendingPathComponent("Frameworks/libvirt/connection-driver").path, 1)
+        setenv("LIBVIRT_STORAGE_BACKEND_DIR", bundleContents.appendingPathComponent("Frameworks/libvirt/storage-backend").path, 1)
         let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
         setenv("PATH", bundleContents.appendingPathComponent("MacOS").path + ":" + path, 1)
 
@@ -70,12 +71,16 @@ enum BundledRuntime {
         // let QEMU write its logs directly.
         let qemuConf = configDir.appendingPathComponent("libvirt/qemu.conf")
         try? "stdio_handler = \"file\"\n".write(to: qemuConf, atomically: true, encoding: .utf8)
+        // One monolithic libvirtd (QEMU + storage drivers) instead of per-driver
+        // daemons, so local storage pools work too.
+        let clientConf = configDir.appendingPathComponent("libvirt/libvirt.conf")
+        try? "remote_mode = \"legacy\"\n".write(to: clientConf, atomically: true, encoding: .utf8)
 
         try? fm.removeItem(at: stableContents)
         try? fm.createSymbolicLink(at: stableContents, withDestinationURL: bundleContents)
     }
 
-    /// Makes sure a virtqemud from this bundle is listening on the session socket.
+    /// Makes sure a libvirtd from this bundle is listening on the session socket.
     static func ensureDaemon() throws {
         guard isAvailable else {
             throw LibvirtError(message: "The bundled libvirt daemon is missing. Run MacVirt from its .app bundle.")
@@ -84,10 +89,10 @@ enum BundledRuntime {
         try? FileManager.default.removeItem(atPath: socketPath)
 
         let daemon = Process()
-        daemon.executableURL = bundleContents.appendingPathComponent("MacOS/virtqemud")
+        daemon.executableURL = bundleContents.appendingPathComponent("MacOS/libvirtd")
         // The daemon will not exit while VMs are running.
         daemon.arguments = ["--timeout=600"]
-        let log = logDir.appendingPathComponent("virtqemud.log")
+        let log = logDir.appendingPathComponent("libvirtd.log")
         FileManager.default.createFile(atPath: log.path, contents: nil)
         daemon.standardOutput = try? FileHandle(forWritingTo: log)
         daemon.standardError = daemon.standardOutput
@@ -96,11 +101,11 @@ enum BundledRuntime {
         for _ in 0 ..< 100 {
             if socketAccepts() { return }
             if !daemon.isRunning {
-                throw LibvirtError(message: "virtqemud exited with status \(daemon.terminationStatus); see \(log.path)")
+                throw LibvirtError(message: "libvirtd exited with status \(daemon.terminationStatus); see \(log.path)")
             }
             usleep(100_000)
         }
-        throw LibvirtError(message: "Timed out waiting for virtqemud; see \(log.path)")
+        throw LibvirtError(message: "Timed out waiting for libvirtd; see \(log.path)")
     }
 
     private static func socketAccepts() -> Bool {
@@ -129,6 +134,16 @@ enum BundledRuntime {
 
     static func firmware(_ name: String) -> String {
         stableContents.appendingPathComponent("share/qemu/\(name)").path
+    }
+
+    /// Defines the "default" storage pool for local VMs (the Images folder).
+    static func ensureDefaultPool(_ conn: Connection) {
+        if (try? conn.storagePool(named: "default")) != nil { return }
+        let xml = "<pool type='dir'><name>default</name><target><path>\(imagesDir.path.xmlEscaped)</path></target></pool>"
+        guard let pool = try? conn.defineStoragePool(xml: xml) else { return }
+        try? pool.build()
+        try? pool.start()
+        try? pool.setAutostart(true)
     }
 
     /// Creates a qcow2 disk image with the bundled qemu-img.

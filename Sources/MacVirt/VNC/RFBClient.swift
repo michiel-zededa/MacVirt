@@ -29,6 +29,8 @@ final class RFBClient: @unchecked Sendable {
     private var zstream = z_stream()
     private var zstreamReady = false
     private var buttonMask: UInt8 = 0
+    /// Set once the server acknowledges the QEMU extended key event encoding.
+    private(set) var supportsScancodes = false
 
     init(transport: VNCTransport) {
         self.transport = transport
@@ -71,8 +73,13 @@ final class RFBClient: @unchecked Sendable {
 
     // MARK: Input (any thread)
 
-    func sendKey(_ keysym: UInt32, down: Bool) {
-        send([4, down ? 1 : 0, 0, 0] + be32(keysym))
+    /// Sends a key; with a QEMU scancode (qnum) the guest's own keyboard layout applies.
+    func sendKey(_ keysym: UInt32, scancode: UInt32? = nil, down: Bool) {
+        if supportsScancodes, let scancode {
+            send([255, 0] + be16(down ? 1 : 0) + be32(keysym) + be32(scancode))
+        } else {
+            send([4, down ? 1 : 0, 0, 0] + be32(keysym))
+        }
     }
 
     func sendPointer(x: Int, y: Int, buttons: UInt8) {
@@ -139,8 +146,8 @@ final class RFBClient: @unchecked Sendable {
 
         // SetPixelFormat: 32bpp, depth 24, little endian, true colour, BGRX in memory.
         send([0, 0, 0, 0, 32, 24, 0, 1] + be16(255) + be16(255) + be16(255) + [16, 8, 0, 0, 0, 0])
-        // SetEncodings: ZRLE, CopyRect, Raw, DesktopSize.
-        let encodings: [Int32] = [16, 1, 0, -223]
+        // SetEncodings: ZRLE, CopyRect, Raw, DesktopSize, QEMU extended key events.
+        let encodings: [Int32] = [16, 1, 0, -223, -258]
         send([2, 0] + be16(UInt16(encodings.count)) + encodings.flatMap { be32(UInt32(bitPattern: $0)) })
         requestUpdate(incremental: false)
 
@@ -211,6 +218,8 @@ final class RFBClient: @unchecked Sendable {
             case 0: try rawRect(x, y, w, h)
             case 1: try copyRect(x, y, w, h)
             case 16: try zrleRect(x, y, w, h)
+            case -258:
+                supportsScancodes = true
             case -223:
                 resize(w, h)
                 DispatchQueue.main.async { self.delegate?.rfbDidConnect(name: "", width: w, height: h) }
@@ -240,6 +249,7 @@ final class RFBClient: @unchecked Sendable {
         let sx = Int(u16(Array(s[0 ..< 2]))), sy = Int(u16(Array(s[2 ..< 4])))
         fbLock.lock()
         defer { fbLock.unlock() }
+        guard sx + w <= width, sy + h <= height, x + w <= width, y + h <= height else { return }
         var tmp = [UInt32](repeating: 0, count: w * h)
         for row in 0 ..< h { for col in 0 ..< w { tmp[row * w + col] = framebuffer[(sy + row) * width + sx + col] } }
         for row in 0 ..< h { for col in 0 ..< w { framebuffer[(y + row) * width + x + col] = tmp[row * w + col] } }
@@ -315,7 +325,9 @@ final class RFBClient: @unchecked Sendable {
                         for i in 0 ..< tw {
                             if left == 0 { cur = Int(try byte()); left = 8 }
                             left -= bits
-                            put(tx + i, ty + j, palette[(cur >> left) & mask])
+                            let idx = (cur >> left) & mask
+                            guard idx < palette.count else { throw LibvirtError(message: "Bad ZRLE palette index") }
+                            put(tx + i, ty + j, palette[idx])
                         }
                     }
                 case 128, 130 ... 255:
@@ -329,6 +341,7 @@ final class RFBClient: @unchecked Sendable {
                             run = try runLength(byte)
                         } else {
                             let idx = Int(try byte())
+                            guard idx & 0x7F < palette.count else { throw LibvirtError(message: "Bad ZRLE palette index") }
                             c = palette[idx & 0x7F]
                             if idx & 0x80 != 0 { run = try runLength(byte) }
                         }
