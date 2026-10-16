@@ -6,7 +6,7 @@ license texts are in `MacVirt.app/Contents/Resources/licenses/`.
 
 | Component | License | Source |
 |-----------|---------|--------|
-| libvirt (library, `virtqemud`, `virsh`, QEMU driver) | LGPL-2.1-or-later | https://libvirt.org/sources/ |
+| libvirt (library, `libvirtd`, `virsh`, QEMU/storage/secret drivers) | LGPL-2.1-or-later | https://libvirt.org/sources/ |
 | QEMU (`qemu-system-aarch64`, `qemu-system-x86_64`, `qemu-img`) | GPL-2.0 | https://www.qemu.org/download/ |
 | SwiftTerm 1.11.2 (terminal emulator, statically linked) | MIT | https://github.com/migueldeicaza/SwiftTerm |
 | EDK2 / OVMF firmware | BSD-2-Clause-Patent | https://github.com/tianocore/edk2 |

@@ -241,7 +241,7 @@ struct NetworksView: View {
 
     private func load(select: String? = nil) async {
         do {
-            networks = try await connection.withConnection { conn in
+            networks = try await connection.withConnection { conn -> [NetworkRow] in
                 try conn.networks().map { n in
                     NetworkRow(name: n.name, active: n.isActive, autostart: n.autostart, bridge: n.bridgeName, xml: (try? n.xml()) ?? "")
                 }

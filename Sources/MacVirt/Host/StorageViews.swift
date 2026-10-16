@@ -55,7 +55,7 @@ final class StorageModel {
 
     func load(select: String? = nil) async {
         do {
-            pools = try await connection.withConnection { conn in
+            pools = try await connection.withConnection { conn -> [PoolRow] in
                 try conn.storagePools().map { p in
                     let xml = (try? p.xml()) ?? ""
                     let doc = try? XMLDocument(xmlString: xml)
@@ -81,7 +81,7 @@ final class StorageModel {
         guard let pool, pool.active else { volumes = []; return }
         let name = pool.name
         do {
-            volumes = try await connection.withConnection { conn in
+            volumes = try await connection.withConnection { conn -> [VolumeRow] in
                 let usedBy = Self.diskUsers(conn)
                 return try conn.storagePool(named: name).volumes().compactMap { v -> VolumeRow? in
                     guard let info = try? v.info() else { return nil }

@@ -227,7 +227,7 @@ struct SnapshotsView: View {
     private func load(select: String? = nil) async {
         let uuid = self.uuid
         do {
-            snapshots = try await connection.withConnection { conn in
+            snapshots = try await connection.withConnection { conn -> [SnapshotRow] in
                 let d = try conn.domain(uuid: uuid)
                 return try d.snapshots().map { SnapshotRow(name: $0.name, xml: (try? $0.xml()) ?? "", isCurrent: $0.isCurrent) }
             }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
